@@ -3,7 +3,8 @@ import time
 import numpy as np
 import cPickle
 
-def get_minibatches(data, minibatch_size, shuffle=True):
+
+def get_minibatches(data, minibatch_size, shuffle=True, is_multi_feature_input=False):
     """
     Iterates through the provided data one minibatch at at time. You can use this function to
     iterate through data in minibatches as follows:
@@ -22,6 +23,7 @@ def get_minibatches(data, minibatch_size, shuffle=True):
             - a list where each element is either a list or numpy array
         minibatch_size: the maximum number of items in a minibatch
         shuffle: whether to randomize the order of returned data
+        is_multi_feature_input: True if multiple type features are present ex. (word, pos, label)
     Returns:
         minibatches: the return value depends on data:
             - If data is a list/array it yields the next minibatch of data.
@@ -30,15 +32,24 @@ def get_minibatches(data, minibatch_size, shuffle=True):
               (e.g., features and labels) at the same time.
 
     """
-    list_data = type(data) is list and (type(data[0]) is list or type(data[0]) is np.ndarray)
-    data_size = len(data[0]) if list_data else len(data)
+    if is_multi_feature_input:
+        list_data = type(data) is list and (type(data[0][0]) is list or type(data[0][0]) is np.ndarray)
+    else:
+        list_data = type(data) is list and (type(data[0]) is list or type(data[0]) is np.ndarray)
+    # data_size = len(data[0]) if list_data else len(data)
+    data_size = len(data[0]) if not is_multi_feature_input else len(data[0][0])
     indices = np.arange(data_size)
     if shuffle:
         np.random.shuffle(indices)
     for minibatch_start in np.arange(0, data_size, minibatch_size):
         minibatch_indices = indices[minibatch_start:minibatch_start + minibatch_size]
-        yield [minibatch(d, minibatch_indices) for d in data] if list_data \
-            else minibatch(data, minibatch_indices)
+        if is_multi_feature_input:
+            yield [[minibatch(data[0][0], minibatch_indices), minibatch(data[0][1], minibatch_indices)],
+                   minibatch(data[1], minibatch_indices)] if list_data \
+                else [minibatch(data[0][0], minibatch_indices), minibatch(data[0][1], minibatch_indices)]
+        else:
+            yield [minibatch(d, minibatch_indices) for d in data] if list_data \
+                else minibatch(data, minibatch_indices)
 
 
 def minibatch(data, minibatch_idx):
@@ -54,13 +65,24 @@ def test_all_close(name, actual, expected):
     else:
         print name, "passed!"
 
+
 def get_pickle(path):
     data = cPickle.load(open(path, "rb"))
     return data
 
+
 def dump_pickle(data, path):
     with open(path, "w") as f:
         cPickle.dump(data, f)
+
+
+def get_vocab_dict(items):
+    item2idx = {}
+    idx = 0
+    for item in items:
+        item2idx[item] = idx
+        idx += 1
+    return item2idx
 
 
 def logged_loop(iterable, n=None):
@@ -126,15 +148,15 @@ class Progbar(object):
             numdigits = int(np.floor(np.log10(self.target))) + 1
             barstr = '%%%dd/%%%dd [' % (numdigits, numdigits)
             bar = barstr % (current, self.target)
-            prog = float(current)/self.target
-            prog_width = int(self.width*prog)
+            prog = float(current) / self.target
+            prog_width = int(self.width * prog)
             if prog_width > 0:
-                bar += ('='*(prog_width-1))
+                bar += ('=' * (prog_width - 1))
                 if current < self.target:
                     bar += '>'
                 else:
                     bar += '='
-            bar += ('.'*(self.width-prog_width))
+            bar += ('.' * (self.width - prog_width))
             bar += ']'
             sys.stdout.write(bar)
             self.total_width = len(bar)
@@ -143,7 +165,7 @@ class Progbar(object):
                 time_per_unit = (now - self.start) / current
             else:
                 time_per_unit = 0
-            eta = time_per_unit*(self.target - current)
+            eta = time_per_unit * (self.target - current)
             info = ''
             if current < self.target:
                 info += ' - ETA: %ds' % eta
@@ -157,7 +179,7 @@ class Progbar(object):
 
             self.total_width += len(info)
             if prev_total_width > self.total_width:
-                info += ((prev_total_width-self.total_width) * " ")
+                info += ((prev_total_width - self.total_width) * " ")
 
             sys.stdout.write(info)
             sys.stdout.flush()
@@ -173,4 +195,4 @@ class Progbar(object):
                 sys.stdout.write(info + "\n")
 
     def add(self, n, values=[]):
-        self.update(self.seen_so_far+n, values)
+        self.update(self.seen_so_far + n, values)
