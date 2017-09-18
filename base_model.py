@@ -26,6 +26,10 @@ class Model(object):
         raise NotImplementedError("Each Model must re-implement this method.")
 
 
+    def add_accuracy_op(self, pred):
+        raise NotImplementedError("Each Model must re-implement this method.")
+
+
     def add_training_op(self, loss):
         raise NotImplementedError("Each Model must re-implement this method.")
 
@@ -55,4 +59,5 @@ class Model(object):
         self.add_placeholders()
         self.pred = self.add_prediction_op()
         self.loss = self.add_loss_op(self.pred)
+        self.accuracy = self.add_accuracy_op(self.pred)
         self.train_op = self.add_training_op(self.loss)

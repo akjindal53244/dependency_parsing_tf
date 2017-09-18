@@ -4,7 +4,6 @@ import datetime
 from enum import Enum
 from general_utils import get_pickle, dump_pickle, get_vocab_dict
 
-
 NULL = "<null>"
 UNK = "<unk>"
 ROOT = "<root>"
@@ -27,6 +26,11 @@ class DataConfig:  # data, embedding, model path etc.
     # model saver
     model_dir = "params_" + today_date
     model_name = "parser.weights"
+
+    # summary
+    summary_dir = "params_" + today_date
+    train_summ_dir = "train_summaries"
+    test_summ_dir = "valid_summaries"
 
     # dump
     dump_dir = "./data/dump"
@@ -58,13 +62,19 @@ class ModelConfig(object):  # Takes care of shape, dimensions used for tf model
     batch_size = 2048
 
     # dropout
-    dropout = 0.5
+    keep_prob = 0.5
 
     # learning_rate
     lr = 0.001
 
     # load existing vocab
     load_existing_vocab = False
+
+    # summary
+    write_summary_after_epochs = 1
+
+    # valid run
+    run_valid_after_epochs = 1
 
 
 class SettingsConfig:  # enabling and disabling features, feature types

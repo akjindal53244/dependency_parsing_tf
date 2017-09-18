@@ -1,0 +1,24 @@
+Debug:
+1. keep_prob -> dropout placeholder :: Done!
+2. check if word embeddings are not being trained, only pos embeddings are being trained :: Done!
+
+New functionality:
+1. define name_scope & variable_scope -> DONE!
+2. add summary operations for tensorboard, visualize training -> DONE!
+3. functionality for graph write and load -> DONE!
+4. add all label classes -> all dependency_labels (2n + 1) now n = 1
+
+
+Learning:
+1. The variables to restore do not have to have been initialized,
+                as restoring is itself a way to initialize variables.
+2. saver.save() saves all variables (trainable & non-trainable both) except placeholder only.
+                No need to call .init(), .assign() etc. during 'TESTING' as .restore() will do the job
+3. model_scope.reuse_variables()
+                -> no need to call tf.variable_scope(model_scope, reuse = True) again
+                -> directly access variables & call functions inside this block itself.
+                -> ref: https://www.tensorflow.org/versions/r1.2/api_docs/python/tf/variable_scope
+                -> https://stackoverflow.com/questions/35919020/whats-the-difference-of-name-scope-and-a-variable-scope-in-tensorflow
+
+4.
+
