@@ -3,17 +3,18 @@ import time
 import tensorflow as tf
 import numpy as np
 from base_model import Model
-from params_init import xavier_weight_init
+from params_init import random_uniform_initializer, random_normal_initializer, xavier_initializer
 from utils.general_utils import Progbar
 from utils.general_utils import get_minibatches
-from utils.feature_extraction import load_datasets, DataConfig, Flags
+from utils.feature_extraction import load_datasets, DataConfig, Flags, punc_pos, pos_prefix
 from utils.tf_utils import visualize_sample_embeddings
 
 
 class ParserModel(Model):
-    def __init__(self, config, word_embeddings, pos_embeddings):
+    def __init__(self, config, word_embeddings, pos_embeddings, dep_embeddings):
         self.word_embeddings = word_embeddings
         self.pos_embeddings = pos_embeddings
+        self.dep_embeddings = dep_embeddings
         self.config = config
         self.build()
 
@@ -25,6 +26,8 @@ class ParserModel(Model):
                                                          dtype=tf.int32, name="batch_word_indices")
             self.pos_input_placeholder = tf.placeholder(shape=[None, self.config.pos_features_types],
                                                         dtype=tf.int32, name="batch_pos_indices")
+            self.dep_input_placeholder = tf.placeholder(shape=[None, self.config.dep_features_types],
+                                                        dtype=tf.int32, name="batch_dep_indices")
         with tf.variable_scope("label_placeholders"):
             self.labels_placeholder = tf.placeholder(shape=[None, self.config.num_classes],
                                                      dtype=tf.float32, name="batch_one_hot_targets")
@@ -37,6 +40,7 @@ class ParserModel(Model):
         feed_dict = {
             self.word_input_placeholder: inputs_batch[0],
             self.pos_input_placeholder: inputs_batch[1],
+            self.dep_input_placeholder: inputs_batch[2],
             self.dropout_placeholder: keep_prob
         }
 
@@ -44,35 +48,6 @@ class ParserModel(Model):
             feed_dict[self.labels_placeholder] = labels_batch
 
         return feed_dict
-
-
-    def add_embedding(self):
-        with tf.variable_scope("feature_lookup"):
-            self.word_embedding_matrix = tf.get_variable(shape=self.word_embeddings.shape, dtype=tf.float32,
-                                                         initializer=tf.random_uniform_initializer(
-                                                             minval=-0.1, maxval=0.1, dtype=tf.float32),
-                                                         trainable=False,
-                                                         name="word_embedding_matrix")
-            self.pos_embedding_matrix = tf.get_variable(shape=self.pos_embeddings.shape, dtype=tf.float32,
-                                                        initializer=tf.random_uniform_initializer(minval=-0.1,
-                                                                                                  maxval=0.1,
-                                                                                                  dtype=tf.float32),
-                                                        trainable=True, name="pos_embedding_matrix")
-
-            word_context_embeddings = tf.nn.embedding_lookup(self.word_embedding_matrix, self.word_input_placeholder)
-            pos_context_embeddings = tf.nn.embedding_lookup(self.pos_embedding_matrix, self.pos_input_placeholder)
-
-            word_embeddings = tf.reshape(word_context_embeddings,
-                                         [-1, self.config.word_features_types * self.config.embedding_dim],
-                                         name="word_context_embeddings")
-            pos_embeddings = tf.reshape(pos_context_embeddings,
-                                        [-1, self.config.pos_features_types * self.config.embedding_dim],
-                                        name="pos_context_embeddings")
-
-        with tf.variable_scope("batch_inputs"):
-            embeddings = tf.concat(1, [word_embeddings, pos_embeddings], name="batch_feature_matrix")
-
-        return embeddings
 
 
     def write_gradient_summaries(self, grad_tvars):
@@ -86,15 +61,113 @@ class ParserModel(Model):
                 tf.summary.scalar("{}/sparsity".format(tvar.name), tf.nn.zero_fraction(grad))
 
 
+    def add_embedding(self):
+        with tf.variable_scope("feature_lookup"):
+            self.word_embedding_matrix = random_uniform_initializer(self.word_embeddings.shape, "word_embedding_matrix",
+                                                                    0.01, trainable=True)
+            self.pos_embedding_matrix = random_uniform_initializer(self.pos_embeddings.shape, "pos_embedding_matrix",
+                                                                   0.01, trainable=True)
+            self.dep_embedding_matrix = random_uniform_initializer(self.dep_embeddings.shape, "dep_embedding_matrix",
+                                                                   0.01, trainable=True)
+
+            word_context_embeddings = tf.nn.embedding_lookup(self.word_embedding_matrix, self.word_input_placeholder)
+            pos_context_embeddings = tf.nn.embedding_lookup(self.pos_embedding_matrix, self.pos_input_placeholder)
+            dep_context_embeddings = tf.nn.embedding_lookup(self.dep_embedding_matrix, self.dep_input_placeholder)
+
+            word_embeddings = tf.reshape(word_context_embeddings,
+                                         [-1, self.config.word_features_types * self.config.embedding_dim],
+                                         name="word_context_embeddings")
+            pos_embeddings = tf.reshape(pos_context_embeddings,
+                                        [-1, self.config.pos_features_types * self.config.embedding_dim],
+                                        name="pos_context_embeddings")
+            dep_embeddings = tf.reshape(dep_context_embeddings,
+                                        [-1, self.config.dep_features_types * self.config.embedding_dim],
+                                        name="dep_context_embeddings")
+
+        with tf.variable_scope("batch_inputs"):
+            embeddings = tf.concat([word_embeddings, pos_embeddings, dep_embeddings], 1, name="batch_feature_matrix")
+
+        return embeddings, word_embeddings, pos_embeddings, dep_embeddings
+
+
+    def add_cube_prediction_op(self):
+        print "***Building network with CUBE activation***"
+        _, word_embeddings, pos_embeddings, dep_embeddings = self.add_embedding()
+
+        with tf.variable_scope("layer_connections"):
+            with tf.variable_scope("layer_1"):
+                w11 = random_uniform_initializer((self.config.word_features_types * self.config.embedding_dim,
+                                                  self.config.l1_hidden_size), "w11",
+                                                 0.01, trainable=True)
+                w12 = random_uniform_initializer((self.config.pos_features_types * self.config.embedding_dim,
+                                                  self.config.l1_hidden_size), "w12",
+                                                 0.01, trainable=True)
+                w13 = random_uniform_initializer((self.config.dep_features_types * self.config.embedding_dim,
+                                                  self.config.l1_hidden_size), "w13",
+                                                 0.01, trainable=True)
+                b1 = random_uniform_initializer((self.config.l1_hidden_size,), "bias1",
+                                                0.01, trainable=True)
+                """
+                w11 = xavier_initializer((self.config.word_features_types * self.config.embedding_dim,
+                                          self.config.l1_hidden_size), "w11")
+                w12 = xavier_initializer((self.config.pos_features_types * self.config.embedding_dim,
+                                          self.config.l1_hidden_size), "w12")
+                w13 = xavier_initializer((self.config.dep_features_types * self.config.embedding_dim,
+                                          self.config.l1_hidden_size), "w13")
+                b1 = xavier_initializer((self.config.l1_hidden_size,), "bias1")
+                """
+
+                # for visualization
+                preactivations = tf.pow(tf.add_n([tf.matmul(word_embeddings, w11),
+                                                  tf.matmul(pos_embeddings, w12),
+                                                  tf.matmul(dep_embeddings, w13)]) + b1, 3, name="preactivations")
+
+                tf.summary.histogram("preactivations", preactivations)
+
+                # non_positive_activation_fraction = tf.reduce_mean(tf.cast(tf.less_equal(preactivations, 0),
+                #                                                           tf.float32))
+                # tf.summary.scalar("non_positive_activations_fraction", non_positive_activation_fraction)
+
+                h1 = tf.nn.dropout(preactivations,
+                                   keep_prob=self.dropout_placeholder,
+                                   name="output_activations")
+
+            with tf.variable_scope("layer_2"):
+                """
+                w2 = xavier_initializer((self.config.l1_hidden_size, self.config.l2_hidden_size), "w2")
+                b2 = xavier_initializer((self.config.l2_hidden_size,), "bias2")
+                """
+
+                w2 = random_uniform_initializer((self.config.l1_hidden_size, self.config.l2_hidden_size), "w2",
+                                                0.01, trainable=True)
+                b2 = random_uniform_initializer((self.config.l2_hidden_size,), "bias2",
+                                                0.01, trainable=True)
+                h2 = tf.nn.relu(tf.add(tf.matmul(h1, w2), b2), name="activations")
+
+            with tf.variable_scope("layer_3"):
+                """
+                w3 = xavier_initializer((self.config.l2_hidden_size, self.config.num_classes), "w3")
+                b3 = xavier_initializer((self.config.num_classes,), "bias3")
+                """
+
+                w3 = random_uniform_initializer((self.config.l2_hidden_size, self.config.num_classes), "w3",
+                                                0.01, trainable=True)
+                b3 = random_uniform_initializer((self.config.num_classes,), "bias3", 0.01, trainable=True)
+        with tf.variable_scope("predictions"):
+            predictions = tf.add(tf.matmul(h2, w3), b3, name="prediction_logits")
+
+        return predictions
+
+
     def add_prediction_op(self):
+        print "***Building network with ReLU activation***"
         x = self.add_embedding()
-        xavier_initializer = xavier_weight_init()
 
         with tf.variable_scope("layer_connections"):
             with tf.variable_scope("layer_1"):
                 w1 = xavier_initializer((self.config.num_features_types * self.config.embedding_dim,
                                          self.config.hidden_size), "w1")
-                b1 = xavier_initializer((self.config.hidden_size,), "b1")
+                b1 = xavier_initializer((self.config.hidden_size,), "bias1")
 
                 # for visualization
                 preactivations = tf.add(tf.matmul(x, w1), b1, name="preactivations")
@@ -110,7 +183,7 @@ class ParserModel(Model):
 
             with tf.variable_scope("layer_2"):
                 w2 = xavier_initializer((self.config.hidden_size, self.config.num_classes), "w2")
-                b2 = xavier_initializer((self.config.num_classes,), "b2")
+                b2 = xavier_initializer((self.config.num_classes,), "bias2")
         with tf.variable_scope("predictions"):
             predictions = tf.add(tf.matmul(h1, w2), b2, name="prediction_logits")
 
@@ -118,9 +191,14 @@ class ParserModel(Model):
 
 
     def add_loss_op(self, pred):
+        tvars = tf.trainable_variables()
         with tf.variable_scope("loss"):
-            loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
-                pred, self.labels_placeholder), name="curr_batch_avg_loss")
+            cross_entropy_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
+                labels=self.labels_placeholder, logits=pred), name="batch_xentropy_loss")
+            l2_loss = tf.scalar_mul(self.config.reg_val, tf.add_n([tf.nn.l2_loss(v) for v in tvars if 'bias' not in
+                                                                   v.name]))
+            loss = tf.add(cross_entropy_loss, l2_loss, name="total_batch_loss")
+
         tf.summary.scalar("batch_loss", loss)
 
         return loss
@@ -147,17 +225,18 @@ class ParserModel(Model):
 
 
     def get_word_pos_inputs(self, inputs_batch):  # inputs_batch : list([list(word_id), list(pos_id)])
-        # inputs_batch: [ [[1,2], [3,4]], [[5,6],[7,8]], [[9,10],[11,12]] ]
+        # inputs_batch: [ [[1,2], [3,4], [5,6]], [[7,8], [9,10],[11,12]] ]
         inputs_batch = np.asarray(inputs_batch)
-        word_inputs_batch, pos_inputs_batch = np.split(inputs_batch, 2, 1)
+        word_inputs_batch, pos_inputs_batch, dep_inputs_batch = np.split(inputs_batch, 3, 1)
         word_inputs_batch = np.squeeze(word_inputs_batch)  # removes extra dimenstion -> convert 3-d to 2-d matrix
         pos_inputs_batch = np.squeeze(pos_inputs_batch)
-        return word_inputs_batch, pos_inputs_batch
+        dep_inputs_batch = np.squeeze(dep_inputs_batch)
+        return word_inputs_batch, pos_inputs_batch, dep_inputs_batch
 
 
     def train_on_batch(self, sess, inputs_batch, labels_batch, merged):
-        word_inputs_batch, pos_inputs_batch = inputs_batch
-        feed = self.create_feed_dict([word_inputs_batch, pos_inputs_batch], labels_batch=labels_batch,
+        word_inputs_batch, pos_inputs_batch, dep_inputs_batch = inputs_batch
+        feed = self.create_feed_dict([word_inputs_batch, pos_inputs_batch, dep_inputs_batch], labels_batch=labels_batch,
                                      keep_prob=self.config.keep_prob)
         _, summary, loss = sess.run([self.train_op, merged, self.loss], feed_dict=feed)
         return summary, loss
@@ -187,13 +266,15 @@ class ParserModel(Model):
                 # repeat
 
                 curr_inputs = [
-                    dataset.feature_extractor.extract_for_current_state(sentence, dataset.word2idx, dataset.pos2idx) for
-                    sentence in curr_sentences]
+                    dataset.feature_extractor.extract_for_current_state(sentence, dataset.word2idx, dataset.pos2idx,
+                                                                        dataset.dep2idx) for sentence in curr_sentences]
                 word_inputs_batch = [curr_inputs[i][0] for i in range(len(curr_inputs))]
                 pos_inputs_batch = [curr_inputs[i][1] for i in range(len(curr_inputs))]
+                dep_inputs_batch = [curr_inputs[i][2] for i in range(len(curr_inputs))]
 
                 predictions = sess.run(self.pred,
-                                       feed_dict=self.create_feed_dict([word_inputs_batch, pos_inputs_batch]))
+                                       feed_dict=self.create_feed_dict([word_inputs_batch, pos_inputs_batch,
+                                                                        dep_inputs_batch]))
                 legal_labels = np.asarray([sentence.get_legal_labels() for sentence in curr_sentences],
                                           dtype=np.float32)
                 legal_transitions = np.argmax(predictions + 1000 * legal_labels, axis=1)
@@ -218,6 +299,7 @@ class ParserModel(Model):
     def get_UAS(self, data):
         correct_tokens = 0
         all_tokens = 0
+        punc_token_pos = [pos_prefix + each for each in punc_pos]
         for sentence in data:
             # reset each predicted head before evaluation
             [token.reset_predicted_head_id() for token in sentence.tokens]
@@ -226,8 +308,13 @@ class ParserModel(Model):
             # assert len(sentence.dependencies) == len(sentence.predicted_dependencies)
             for h, t, in sentence.predicted_dependencies:
                 head[t.token_id] = h.token_id
-            correct_tokens += sum([1 if token.head_id == head[i] else 0 for (i, token) in enumerate(sentence.tokens)])
-            all_tokens += len(sentence.tokens)
+
+            non_punc_tokens = [token for token in sentence.tokens if token.pos not in punc_token_pos]
+            correct_tokens += sum([1 if token.head_id == head[token.token_id] else 0 for (_, token) in enumerate(
+                non_punc_tokens)])
+
+            # all_tokens += len(sentence.tokens)
+            all_tokens += len(non_punc_tokens)
 
         UAS = correct_tokens / float(all_tokens)
         return UAS
@@ -284,17 +371,23 @@ def highlight_string(temp):
     print 80 * "="
 
 
-def main(flag, load_existing_vocab=False):
+def main(flag, load_existing_dump=False):
     highlight_string("INITIALIZING")
     print "loading data.."
 
-    dataset = load_datasets(load_existing_vocab)
+    dataset = load_datasets(load_existing_dump)
     config = dataset.model_config
 
     print "word vocab Size: {}".format(len(dataset.word2idx))
     print "pos vocab Size: {}".format(len(dataset.pos2idx))
+    print "dep vocab Size: {}".format(len(dataset.dep2idx))
     print "Training Size: {}".format(len(dataset.train_inputs[0]))
     print "valid data Size: {}".format(len(dataset.valid_data))
+    print "test data Size: {}".format(len(dataset.test_data))
+
+    print len(dataset.word2idx), len(dataset.word_embedding_matrix)
+    print len(dataset.pos2idx), len(dataset.pos_embedding_matrix)
+    print len(dataset.dep2idx), len(dataset.dep_embedding_matrix)
 
     if not os.path.exists(os.path.join(DataConfig.data_dir_path, DataConfig.model_dir)):
         os.makedirs(os.path.join(DataConfig.data_dir_path, DataConfig.model_dir))
@@ -303,7 +396,8 @@ def main(flag, load_existing_vocab=False):
         print "Building network...",
         start = time.time()
         with tf.variable_scope("model") as model_scope:
-            model = ParserModel(config, dataset.word_embedding_matrix, dataset.pos_embedding_matrix)
+            model = ParserModel(config, dataset.word_embedding_matrix, dataset.pos_embedding_matrix,
+                                dataset.dep_embedding_matrix)
             saver = tf.train.Saver()
             """
             model_scope.reuse_variables()
@@ -330,6 +424,7 @@ def main(flag, load_existing_vocab=False):
             """ call 'assignment' after 'init' only, else 'assignment' will get reset by 'init' """
             sess.run(tf.assign(model.word_embedding_matrix, model.word_embeddings))
             sess.run(tf.assign(model.pos_embedding_matrix, model.pos_embeddings))
+            sess.run(tf.assign(model.dep_embedding_matrix, model.dep_embeddings))
 
             highlight_string("TRAINING")
             model.print_trainable_varibles()
@@ -387,4 +482,4 @@ def main(flag, load_existing_vocab=False):
 
 
 if __name__ == '__main__':
-    main(Flags.TRAIN, load_existing_vocab=True)
+    main(Flags.TRAIN, load_existing_dump=True)

@@ -44,9 +44,9 @@ def get_minibatches(data, minibatch_size, shuffle=True, is_multi_feature_input=F
     for minibatch_start in np.arange(0, data_size, minibatch_size):
         minibatch_indices = indices[minibatch_start:minibatch_start + minibatch_size]
         if is_multi_feature_input:
-            yield [[minibatch(data[0][0], minibatch_indices), minibatch(data[0][1], minibatch_indices)],
+            yield [[minibatch(data[0][i], minibatch_indices) for i in range(len(data[0]))],
                    minibatch(data[1], minibatch_indices)] if list_data \
-                else [minibatch(data[0][0], minibatch_indices), minibatch(data[0][1], minibatch_indices)]
+                else [minibatch(data[0][i], minibatch_indices) for i in range(len(data[0]))]
         else:
             yield [minibatch(d, minibatch_indices) for d in data] if list_data \
                 else minibatch(data, minibatch_indices)
@@ -196,3 +196,48 @@ class Progbar(object):
 
     def add(self, n, values=[]):
         self.update(self.seen_so_far + n, values)
+
+# glove_dict = get_pickle("/home/asjindal/Work/tf/pkl/glove.6B.100d.pkl")
+# print len(glove_dict)
+# print glove_dict["apple"], type(glove_dict["apple"])
+# print "A"
+
+
+def make_embedding_to_pkl():
+    senna_file = ("/home/asjindal/Work/Retraining/en-senna-50.txt", "senna.50d_dict.pkl")
+    glove_50d_file = ("/home/asjindal/data/glove/glove.6B.50d.txt", "glove.6B.50d_dict.pkl")
+    glove_100d_file = ("/home/asjindal/data/glove/glove.6B.100d.txt", "glove.6B.100d_dict.pkl")
+    glove_300d_file = ("/home/asjindal/Downloads/glove.42B.300d.txt", "glove.42B.300d_dict.pkl")
+
+    all_files = [senna_file, glove_50d_file, glove_100d_file, glove_300d_file]
+
+    word_vectors = {}
+    for file in all_files:
+        lines = open(file[0], "r").readlines()
+        if "\t" in lines[0].strip():
+            delim = "\t"
+        else:
+            delim = " "
+        for line in lines:
+            sp = line.strip().split(delim)
+            """
+            if delim == " ":
+                word_vectors[sp[0]] = np.array([float(x) for x in sp[1:]])
+            else:
+                word_vectors[sp[0]] = np.array([float(x) for x in sp[1].split()])
+            """
+
+            if delim == " ":
+                word_vectors[sp[0]] = " ".join(sp[1:]).strip()
+            else:
+                word_vectors[sp[0]] = sp[1].strip()
+
+        print "Loaded!"
+        dump_pickle(word_vectors, "/home/asjindal/data/embeddings_pkl/" + file[1])
+        print "Done!"
+
+# make_embedding_to_pkl()
+
+# glove300d_pkl = get_pickle("/home/asjindal/data/embeddings_pkl/glove300d_dict.pkl")
+# print len(glove300d_pkl)
+# print glove300d_pkl["apple"], type(glove300d_pkl["apple"])

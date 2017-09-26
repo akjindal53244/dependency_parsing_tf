@@ -8,7 +8,8 @@ NULL = "<null>"
 UNK = "<unk>"
 ROOT = "<root>"
 pos_prefix = "<p>:"
-# dep_prefix = "<d>:"
+dep_prefix = "<d>:"
+punc_pos = ["''", "``", ":", ".", ","]
 
 today_date = str(datetime.datetime.now().date())
 
@@ -16,7 +17,7 @@ today_date = str(datetime.datetime.now().date())
 class DataConfig:  # data, embedding, model path etc.
     # Data Paths
     data_dir_path = "./data"
-    train_path = "train.conll"
+    train_path = "dev.conll"
     valid_path = "dev.conll"
     test_path = "test.conll"
 
@@ -32,21 +33,29 @@ class DataConfig:  # data, embedding, model path etc.
     train_summ_dir = "train_summaries"
     test_summ_dir = "valid_summaries"
 
-    # dump
+    # dump - vocab
     dump_dir = "./data/dump"
     word_vocab_file = "word2idx.pkl"
     pos_vocab_file = "pos2idx.pkl"
+    dep_vocab_file = "dep2idx.pkl"
+
+    # dump - embedding
+    word_emb_file = "word_emb.pkl"  # 2d array
+    pos_emb_file = "pos_emb.pkl"  # 2d array
+    dep_emb_file = "dep_emb.pkl"  # 2d array
 
 
 class ModelConfig(object):  # Takes care of shape, dimensions used for tf model
     # Input
     word_features_types = None
     pos_features_types = None
+    dep_features_types = None
     num_features_types = None
     embedding_dim = 50
 
     # hidden_size
-    hidden_size = 200
+    l1_hidden_size = 200
+    l2_hidden_size = 15
 
     # output
     num_classes = 3
@@ -54,15 +63,17 @@ class ModelConfig(object):  # Takes care of shape, dimensions used for tf model
     # Vocab
     word_vocab_size = None
     pos_vocab_size = None
+    dep_vocab_size = None
 
     # num_epochs
-    n_epochs = 10
+    n_epochs = 20
 
     # batch_size
     batch_size = 2048
 
     # dropout
     keep_prob = 0.5
+    reg_val = 1e-8
 
     # learning_rate
     lr = 0.001
@@ -81,6 +92,7 @@ class SettingsConfig:  # enabling and disabling features, feature types
     # Features
     use_word = True
     use_pos = True
+    use_dep = True
     is_lower = True
 
 
@@ -91,10 +103,11 @@ class Flags(Enum):
 
 
 class Token(object):
-    def __init__(self, token_id, word, pos, head_id):
+    def __init__(self, token_id, word, pos, dep, head_id):
         self.token_id = token_id  # token index
         self.word = word.lower() if SettingsConfig.is_lower else word
         self.pos = pos_prefix + pos
+        self.dep = dep_prefix + dep
         self.head_id = head_id  # head token index
         self.predicted_head_id = None
         self.left_children = list()
@@ -123,14 +136,14 @@ class Token(object):
         self.predicted_head_id = None
 
 
-NULL_TOKEN = Token(-1, NULL, NULL, -1)
-ROOT_TOKEN = Token(-1, ROOT, ROOT, -1)
-UNK_TOKEN = Token(-1, UNK, UNK, -1)
+NULL_TOKEN = Token(-1, NULL, NULL, NULL, -1)
+ROOT_TOKEN = Token(-1, ROOT, ROOT, ROOT, -1)
+UNK_TOKEN = Token(-1, UNK, UNK, UNK, -1)
 
 
 class Sentence(object):
     def __init__(self, tokens):
-        self.Root = Token(-1, ROOT, ROOT, -1)
+        self.Root = Token(-1, ROOT, ROOT, ROOT, -1)
         self.tokens = tokens
         self.buff = [token for token in self.tokens]
         self.stack = [self.Root]
@@ -254,10 +267,13 @@ class Dataset(object):
         self.idx2word = None
         self.pos2idx = None
         self.idx2pos = None
+        self.dep2idx = None
+        self.idx2dep = None
 
         # Embedding Matrix
         self.word_embedding_matrix = None
         self.pos_embedding_matrix = None
+        self.dep_embedding_matrix = None
 
         # input & outputs
         self.train_inputs, self.train_targets = None, None
@@ -269,10 +285,12 @@ class Dataset(object):
 
         all_words = set()
         all_pos = set()
+        all_dep = set()
 
         for sentence in self.train_data:
             all_words.update(set(map(lambda x: x.word, sentence.tokens)))
             all_pos.update(set(map(lambda x: x.pos, sentence.tokens)))
+            all_dep.update(set(map(lambda x: x.dep, sentence.tokens)))
 
         all_words.add(ROOT_TOKEN.word)
         all_words.add(NULL_TOKEN.word)
@@ -282,8 +300,13 @@ class Dataset(object):
         all_pos.add(NULL_TOKEN.pos)
         all_pos.add(UNK_TOKEN.pos)
 
+        all_dep.add(ROOT_TOKEN.dep)
+        all_dep.add(NULL_TOKEN.dep)
+        all_dep.add(UNK_TOKEN.dep)
+
         word_vocab = list(all_words)
         pos_vocab = list(all_pos)
+        dep_vocab = list(all_dep)
 
         word2idx = get_vocab_dict(word_vocab)
         idx2word = {idx: word for (word, idx) in word2idx.items()}
@@ -291,21 +314,29 @@ class Dataset(object):
         pos2idx = get_vocab_dict(pos_vocab)
         idx2pos = {idx: pos for (pos, idx) in pos2idx.items()}
 
+        dep2idx = get_vocab_dict(dep_vocab)
+        idx2dep = {idx: dep for (dep, idx) in dep2idx.items()}
+
         self.word2idx = word2idx
         self.idx2word = idx2word
 
         self.pos2idx = pos2idx
         self.idx2pos = idx2pos
 
+        self.dep2idx = dep2idx
+        self.idx2dep = idx2dep
+
 
     def build_embedding_matrix(self):
 
+        # load word vectors
         word_vectors = {}
         embedding_lines = open(os.path.join(DataConfig.data_dir_path, DataConfig.embedding_file), "r").readlines()
         for line in embedding_lines:
             sp = line.strip().split()
             word_vectors[sp[0]] = [float(x) for x in sp[1:]]
 
+        # word embedding
         self.model_config.word_vocab_size = len(self.word2idx)
         word_embedding_matrix = np.asarray(
             np.random.normal(0, 0.9, size=(self.model_config.word_vocab_size, self.model_config.embedding_dim)),
@@ -317,19 +348,24 @@ class Dataset(object):
                 word_embedding_matrix[idx] = word_vectors[word.lower()]
         self.word_embedding_matrix = word_embedding_matrix
 
+        # pos embedding
         self.model_config.pos_vocab_size = len(self.pos2idx)
         pos_embedding_matrix = np.asarray(
             np.random.normal(0, 0.9, size=(self.model_config.pos_vocab_size, self.model_config.embedding_dim)),
             dtype=np.float32)
         self.pos_embedding_matrix = pos_embedding_matrix
 
-        # embedding_matrix = np.asarray(np.random.uniform(
-        #     low=0., high=0., size=(vocab_size, self.model_config.embedding_dim)), dtype=np.float32)
+        # dep embedding
+        self.model_config.dep_vocab_size = len(self.dep2idx)
+        dep_embedding_matrix = np.asarray(
+            np.random.normal(0, 0.9, size=(self.model_config.dep_vocab_size, self.model_config.embedding_dim)),
+            dtype=np.float32)
+        self.dep_embedding_matrix = dep_embedding_matrix
 
 
     def convert_data_to_ids(self):
         self.train_inputs, self.train_targets = self.feature_extractor. \
-            create_instances_for_data(self.train_data, self.word2idx, self.pos2idx)
+            create_instances_for_data(self.train_data, self.word2idx, self.pos2idx, self.dep2idx)
 
         # self.valid_inputs, self.valid_targets = self.feature_extractor.\
         #     create_instances_for_data(self.valid_data, self.word2idx)
@@ -387,12 +423,13 @@ class FeatureExtractor(object):
         return children_tokens  # 12 features
 
 
-    def extract_for_current_state(self, sentence, word2idx, pos2idx):
+    def extract_for_current_state(self, sentence, word2idx, pos2idx, dep2idx):
         direct_tokens = self.extract_from_stack_and_buffer(sentence, num_words=3)
         children_tokens = self.extract_children_from_stack(sentence, num_stack_words=2)
 
         word_features = []
         pos_features = []
+        dep_features = []
 
         # Word features -> 18
         word_features.extend(map(lambda x: x.word, direct_tokens))
@@ -402,21 +439,26 @@ class FeatureExtractor(object):
         pos_features.extend(map(lambda x: x.pos, direct_tokens))
         pos_features.extend(map(lambda x: x.pos, children_tokens))
 
+        # dep features -> 12 (only children)
+        dep_features.extend(map(lambda x: x.dep, children_tokens))
+
         word_input_ids = [word2idx[word] if word in word2idx else word2idx[UNK_TOKEN.word] for word in word_features]
         pos_input_ids = [pos2idx[pos] if pos in pos2idx else pos2idx[UNK_TOKEN.pos] for pos in pos_features]
+        dep_input_ids = [dep2idx[dep] if dep in dep2idx else dep2idx[UNK_TOKEN.dep] for dep in dep_features]
 
-        return [word_input_ids, pos_input_ids]  # 36 features
+        return [word_input_ids, pos_input_ids, dep_input_ids]  # 48 features
 
 
-    def create_instances_for_data(self, data, word2idx, pos2idx):
+    def create_instances_for_data(self, data, word2idx, pos2idx, dep2idx):
         lables = []
         word_inputs = []
         pos_inputs = []
+        dep_inputs = []
         for i, sentence in enumerate(data):
             num_words = len(sentence.tokens)
 
             for _ in range(num_words * 2):
-                word_input, pos_input = self.extract_for_current_state(sentence, word2idx, pos2idx)
+                word_input, pos_input, dep_input = self.extract_for_current_state(sentence, word2idx, pos2idx, dep2idx)
                 legal_labels = sentence.get_legal_labels()
                 curr_transition = sentence.get_transition_from_current_state()
                 if curr_transition is None:
@@ -431,6 +473,8 @@ class FeatureExtractor(object):
                 lables.append(curr_transition)
                 word_inputs.append(word_input)
                 pos_inputs.append(pos_input)
+                dep_inputs.append(dep_input)
+
             else:
                 sentence.reset_to_initial_state()
 
@@ -440,7 +484,7 @@ class FeatureExtractor(object):
         targets = np.zeros((len(lables), self.model_config.num_classes), dtype=np.int32)
         targets[np.arange(len(targets)), lables] = 1
 
-        return [word_inputs, pos_inputs], targets
+        return [word_inputs, pos_inputs, dep_inputs], targets
 
 
 class DataReader(object):
@@ -455,8 +499,9 @@ class DataReader(object):
             token_index = int(fields[0]) - 1
             word = fields[1]
             pos = fields[4]
+            dep = fields[7]
             head_index = int(fields[6]) - 1
-            token = Token(token_index, word, pos, head_index)
+            token = Token(token_index, word, pos, dep, head_index)
             tokens.append(token)
         sentence = Sentence(tokens)
 
@@ -479,7 +524,7 @@ class DataReader(object):
         return data_objects
 
 
-def load_datasets(load_existing_vocab=False):
+def load_datasets(load_existing_dump=False):
     model_config = ModelConfig()
 
     data_reader = DataReader()
@@ -499,27 +544,42 @@ def load_datasets(load_existing_vocab=False):
     dataset = Dataset(model_config, train_data, valid_data, test_data, feature_extractor)
 
     # Vocab processing
-    if load_existing_vocab:
+    if load_existing_dump:
         dataset.word2idx = get_pickle(os.path.join(DataConfig.dump_dir, DataConfig.word_vocab_file))
         dataset.idx2word = {idx: word for (word, idx) in dataset.word2idx.items()}
         dataset.pos2idx = get_pickle(os.path.join(DataConfig.dump_dir, DataConfig.pos_vocab_file))
         dataset.idx2pos = {idx: pos for (pos, idx) in dataset.pos2idx.items()}
+        dataset.dep2idx = get_pickle(os.path.join(DataConfig.dump_dir, DataConfig.dep_vocab_file))
+        dataset.idx2dep = {idx: dep for (dep, idx) in dataset.dep2idx.items()}
+
         dataset.model_config.load_existing_vocab = True
         print "loaded existing Vocab!"
+        dataset.word_embedding_matrix = get_pickle(os.path.join(DataConfig.dump_dir, DataConfig.word_emb_file))
+        dataset.pos_embedding_matrix = get_pickle(os.path.join(DataConfig.dump_dir, DataConfig.pos_emb_file))
+        dataset.dep_embedding_matrix = get_pickle(os.path.join(DataConfig.dump_dir, DataConfig.dep_emb_file))
+        print "loaded existing embedding matrix!"
+
     else:
         dataset.build_vocab()
         dump_pickle(dataset.word2idx, os.path.join(DataConfig.dump_dir, DataConfig.word_vocab_file))
         dump_pickle(dataset.pos2idx, os.path.join(DataConfig.dump_dir, DataConfig.pos_vocab_file))
+        dump_pickle(dataset.dep2idx, os.path.join(DataConfig.dump_dir, DataConfig.dep_vocab_file))
         dataset.model_config.load_existing_vocab = True
         print "Vocab Build Done!"
+        dataset.build_embedding_matrix()
+        print "embedding matrix Build Done"
+        dump_pickle(dataset.word_embedding_matrix, os.path.join(DataConfig.dump_dir, DataConfig.word_emb_file))
+        dump_pickle(dataset.pos_embedding_matrix, os.path.join(DataConfig.dump_dir, DataConfig.pos_emb_file))
+        dump_pickle(dataset.dep_embedding_matrix, os.path.join(DataConfig.dump_dir, DataConfig.dep_emb_file))
 
-    dataset.build_embedding_matrix()
-    print "embedding matrix Build Done"
+    print "converting data into ids.."
     dataset.convert_data_to_ids()
-    print "converted data to ids"
+    print "Done!"
     dataset.model_config.word_features_types = len(dataset.train_inputs[0][0])
-    dataset.model_config.pos_features_types = len(dataset.train_inputs[0][1])
-    dataset.model_config.num_features_types = dataset.model_config.word_features_types + dataset.model_config.pos_features_types
+    dataset.model_config.pos_features_types = len(dataset.train_inputs[1][0])
+    dataset.model_config.dep_features_types = len(dataset.train_inputs[2][0])
+    dataset.model_config.num_features_types = dataset.model_config.word_features_types + \
+                                              dataset.model_config.pos_features_types + dataset.model_config.dep_features_types
     dataset.model_config.num_classes = len(dataset.train_targets[0])
 
     return dataset

@@ -22,3 +22,10 @@ Learning:
 
 4.
 
+
+-> trainable word embeddings -> Done
+-> num of layers -> 2 hidden + softmax
+-> xavior vs random_uniform vs random_normal ->
+-> evaluation without punc_pos -> Done
+-> l2_loss -> Done
+->

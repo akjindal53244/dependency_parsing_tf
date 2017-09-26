@@ -1,4 +1,0 @@
-embeddings {
-  tensor_name: "model/feature_lookup/pos_embedding_matrix:0"
-  metadata_path: "./data/params_2017-09-18/metadata.tsv"
-}
