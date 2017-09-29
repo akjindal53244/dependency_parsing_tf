@@ -17,7 +17,7 @@ today_date = str(datetime.datetime.now().date())
 class DataConfig:  # data, embedding, model path etc.
     # Data Paths
     data_dir_path = "./data"
-    train_path = "dev.conll"
+    train_path = "train.conll"
     valid_path = "dev.conll"
     test_path = "test.conll"
 
