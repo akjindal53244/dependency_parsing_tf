@@ -1,7 +1,7 @@
 import sys
 import time
 import numpy as np
-import cPickle
+import pickle
 
 
 def get_minibatches(data, minibatch_size, shuffle=True, is_multi_feature_input=False):
@@ -63,17 +63,17 @@ def test_all_close(name, actual, expected):
     if np.amax(np.fabs(actual - expected)) > 1e-6:
         raise ValueError("{:} failed, expected {:} but value is {:}".format(name, expected, actual))
     else:
-        print name, "passed!"
+        print(name, "passed!")
 
 
 def get_pickle(path):
-    data = cPickle.load(open(path, "rb"))
+    data = pickle.load(open(path, "rb"))
     return data
 
 
 def dump_pickle(data, path):
     with open(path, "w") as f:
-        cPickle.dump(data, f)
+        pickle.dump(data, f)
 
 
 def get_vocab_dict(items):

@@ -2,7 +2,7 @@ import os
 import numpy as np
 import datetime
 from enum import Enum
-from general_utils import get_pickle, dump_pickle, get_vocab_dict
+from utils.general_utils import get_pickle, dump_pickle, get_vocab_dict
 
 NULL = "<null>"
 UNK = "<unk>"
@@ -445,7 +445,7 @@ class FeatureExtractor(object):
 
 class DataReader(object):
     def __init__(self):
-        print "A"
+        print("A")
 
 
     def read_conll(self, token_lines):
@@ -489,11 +489,11 @@ def load_datasets(load_existing_vocab=False):
 
     # Load data
     train_data = data_reader.read_data(train_lines)
-    print ("Loaded Train data")
+    print("Loaded Train data")
     valid_data = data_reader.read_data(valid_lines)
-    print ("Loaded Dev data")
+    print("Loaded Dev data")
     test_data = data_reader.read_data(test_lines)
-    print ("Loaded Test data")
+    print("Loaded Test data")
 
     feature_extractor = FeatureExtractor(model_config)
     dataset = Dataset(model_config, train_data, valid_data, test_data, feature_extractor)
@@ -505,18 +505,18 @@ def load_datasets(load_existing_vocab=False):
         dataset.pos2idx = get_pickle(os.path.join(DataConfig.dump_dir, DataConfig.pos_vocab_file))
         dataset.idx2pos = {idx: pos for (pos, idx) in dataset.pos2idx.items()}
         dataset.model_config.load_existing_vocab = True
-        print "loaded existing Vocab!"
+        print("loaded existing Vocab!")
     else:
         dataset.build_vocab()
         dump_pickle(dataset.word2idx, os.path.join(DataConfig.dump_dir, DataConfig.word_vocab_file))
         dump_pickle(dataset.pos2idx, os.path.join(DataConfig.dump_dir, DataConfig.pos_vocab_file))
         dataset.model_config.load_existing_vocab = True
-        print "Vocab Build Done!"
+        print("Vocab Build Done!")
 
     dataset.build_embedding_matrix()
-    print "embedding matrix Build Done"
+    print("embedding matrix Build Done")
     dataset.convert_data_to_ids()
-    print "converted data to ids"
+    print("converted data to ids")
     dataset.model_config.word_features_types = len(dataset.train_inputs[0][0])
     dataset.model_config.pos_features_types = len(dataset.train_inputs[0][1])
     dataset.model_config.num_features_types = dataset.model_config.word_features_types + dataset.model_config.pos_features_types

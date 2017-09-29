@@ -9,7 +9,6 @@ from utils.general_utils import get_minibatches
 from utils.feature_extraction import load_datasets, DataConfig, Flags
 from utils.tf_utils import visualize_sample_embeddings
 
-
 class ParserModel(Model):
     def __init__(self, config, word_embeddings, pos_embeddings):
         self.word_embeddings = word_embeddings
@@ -70,7 +69,7 @@ class ParserModel(Model):
                                         name="pos_context_embeddings")
 
         with tf.variable_scope("batch_inputs"):
-            embeddings = tf.concat(1, [word_embeddings, pos_embeddings], name="batch_feature_matrix")
+            embeddings = tf.concat([word_embeddings, pos_embeddings], 1,  name="batch_feature_matrix")
 
         return embeddings
 
@@ -120,7 +119,7 @@ class ParserModel(Model):
     def add_loss_op(self, pred):
         with tf.variable_scope("loss"):
             loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
-                pred, self.labels_placeholder), name="curr_batch_avg_loss")
+                logits=pred, labels=self.labels_placeholder), name="curr_batch_avg_loss")
         tf.summary.scalar("batch_loss", loss)
 
         return loss
@@ -136,11 +135,13 @@ class ParserModel(Model):
 
     def add_training_op(self, loss):
         with tf.variable_scope("optimizer"):
-            tvars = tf.trainable_variables()
-            grads = tf.gradients(loss, tvars)
-            grad_tvars = zip(grads, tvars)
-            self.write_gradient_summaries(grad_tvars)
             optimizer = tf.train.AdamOptimizer(learning_rate=self.config.lr, name="adam_optimizer")
+            tvars = tf.trainable_variables()
+            grad_tvars = optimizer.compute_gradients(loss, tvars)
+            # grads = tf.gradients(loss, tvars)
+            # grad_tvars = zip(grads, tvars)
+            self.write_gradient_summaries(grad_tvars)
+            # optimizer = tf.train.AdamOptimizer(learning_rate=self.config.lr, name="adam_optimizer")
             train_op = optimizer.apply_gradients(grad_tvars)
 
         return train_op
@@ -246,17 +247,17 @@ class ParserModel(Model):
 
 
     def run_valid_epoch(self, sess, dataset):
-        print "Evaluating on dev set",
+        print ("Evaluating on dev set")
         self.compute_dependencies(sess, dataset.valid_data, dataset)
         valid_UAS = self.get_UAS(dataset.valid_data)
-        print "- dev UAS: {:.2f}".format(valid_UAS * 100.0)
+        print ("- dev UAS: {:.2f}".format(valid_UAS * 100.0))
         return valid_UAS
 
 
     def fit(self, sess, saver, config, dataset, train_writer, valid_writer, merged):
         best_valid_UAS = 0
         for epoch in range(config.n_epochs):
-            print "Epoch {:} out of {:}".format(epoch + 1, self.config.n_epochs)
+            print ("Epoch {:} out of {:}".format(epoch + 1, self.config.n_epochs))
 
             summary, loss = self.run_epoch(sess, config, dataset, train_writer, merged)
 
@@ -267,7 +268,7 @@ class ParserModel(Model):
                 if valid_UAS > best_valid_UAS:
                     best_valid_UAS = valid_UAS
                     if saver:
-                        print "New best dev UAS! Saving model.."
+                        print ("New best dev UAS! Saving model..")
                         saver.save(sess, os.path.join(DataConfig.data_dir_path, DataConfig.model_dir,
                                                       DataConfig.model_name))
 
@@ -279,28 +280,28 @@ class ParserModel(Model):
 
 
 def highlight_string(temp):
-    print 80 * "="
-    print temp
-    print 80 * "="
+    print(80 * "=")
+    print(temp)
+    print(80 * "=")
 
 
 def main(flag, load_existing_vocab=False):
     highlight_string("INITIALIZING")
-    print "loading data.."
+    print("loading data..")
 
     dataset = load_datasets(load_existing_vocab)
     config = dataset.model_config
 
-    print "word vocab Size: {}".format(len(dataset.word2idx))
-    print "pos vocab Size: {}".format(len(dataset.pos2idx))
-    print "Training Size: {}".format(len(dataset.train_inputs[0]))
-    print "valid data Size: {}".format(len(dataset.valid_data))
+    print("word vocab Size: {}".format(len(dataset.word2idx)))
+    print("pos vocab Size: {}".format(len(dataset.pos2idx)))
+    print("Training Size: {}".format(len(dataset.train_inputs[0])))
+    print("valid data Size: {}".format(len(dataset.valid_data)))
 
     if not os.path.exists(os.path.join(DataConfig.data_dir_path, DataConfig.model_dir)):
         os.makedirs(os.path.join(DataConfig.data_dir_path, DataConfig.model_dir))
 
     with tf.Graph().as_default(), tf.Session() as sess:
-        print "Building network...",
+        print("Building network...")
         start = time.time()
         with tf.variable_scope("model") as model_scope:
             model = ParserModel(config, dataset.word_embedding_matrix, dataset.pos_embedding_matrix)
@@ -313,7 +314,7 @@ def main(flag, load_existing_vocab=False):
                 -> https://stackoverflow.com/questions/35919020/whats-the-difference-of-name-scope-and-a-variable-scope-in-tensorflow
             """
 
-        print "took {:.2f} seconds\n".format(time.time() - start)
+        print("took {:.2f} seconds\n".format(time.time() - start))
 
         merged = tf.summary.merge_all()
         train_writer = tf.summary.FileWriter(os.path.join(DataConfig.data_dir_path, DataConfig.summary_dir,
@@ -338,12 +339,12 @@ def main(flag, load_existing_vocab=False):
 
             # Testing
             highlight_string("Testing")
-            print "Restoring best found parameters on dev set"
+            print("Restoring best found parameters on dev set")
             saver.restore(sess, os.path.join(DataConfig.data_dir_path, DataConfig.model_dir,
                                              DataConfig.model_name))
             model.compute_dependencies(sess, dataset.test_data, dataset)
             test_UAS = model.get_UAS(dataset.test_data)
-            print "test UAS: {}".format(test_UAS * 100)
+            print("test UAS: {}".format(test_UAS * 100))
 
             train_writer.close()
             valid_writer.close()
@@ -354,20 +355,20 @@ def main(flag, load_existing_vocab=False):
                                           [len(dataset.pos2idx.keys()), dataset.model_config.embedding_dim])
                 visualize_sample_embeddings(sess, os.path.join(DataConfig.data_dir_path, DataConfig.model_dir),
                                             dataset.pos2idx.keys(), dataset.pos2idx, pos_emb)
-            print "to Visualize Embeddings, run in terminal:"
-            print "tensorboard --logdir=" + os.path.abspath(os.path.join(DataConfig.data_dir_path,
-                                                                         DataConfig.model_dir))
+            print("to Visualize Embeddings, run in terminal:")
+            print("tensorboard --logdir=" + os.path.abspath(os.path.join(DataConfig.data_dir_path,
+                                                                         DataConfig.model_dir)))
 
         else:
             ckpt_path = tf.train.latest_checkpoint(os.path.join(DataConfig.data_dir_path,
                                                                 DataConfig.model_dir))
             if ckpt_path is not None:
-                print "Found checkpoint! Restoring variables.."
+                print("Found checkpoint! Restoring variables..")
                 saver.restore(sess, ckpt_path)
                 highlight_string("Testing")
                 model.compute_dependencies(sess, dataset.test_data, dataset)
                 test_UAS = model.get_UAS(dataset.test_data)
-                print "test UAS: {}".format(test_UAS * 100)
+                print("test UAS: {}".format(test_UAS * 100))
                 # model.run_valid_epoch(sess, dataset.valid_data, dataset)
                 # valid_UAS = model.get_UAS(dataset.valid_data)
                 # print "valid UAS: {}".format(valid_UAS * 100)
@@ -378,12 +379,12 @@ def main(flag, load_existing_vocab=False):
                                               [len(dataset.pos2idx.keys()), dataset.model_config.embedding_dim])
                     visualize_sample_embeddings(sess, os.path.join(DataConfig.data_dir_path, DataConfig.model_dir),
                                                 dataset.pos2idx.keys(), dataset.pos2idx, pos_emb)
-                print "to Visualize Embeddings, run in terminal:"
-                print "tensorboard --logdir=" + os.path.abspath(os.path.join(DataConfig.data_dir_path,
-                                                                             DataConfig.model_dir))
+                print("to Visualize Embeddings, run in terminal:")
+                print("tensorboard --logdir=" + os.path.abspath(os.path.join(DataConfig.data_dir_path,
+                                                                             DataConfig.model_dir)))
 
             else:
-                print "No checkpoint found!"
+                print("No checkpoint found!")
 
 
 if __name__ == '__main__':

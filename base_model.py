@@ -47,12 +47,12 @@ class Model(object):
 
 
     def print_trainable_varibles(self):
-        print "\n******** Model Trainable Variables :: <name, shape> ********"
+        print("\n******** Model Trainable Variables :: <name, shape> ********")
         for name, shape in zip(map(lambda x: x.name, tf.trainable_variables()),
                                map(lambda x: x.get_shape(), tf.trainable_variables())):
-            print "variable: {} \t shape: {}".format(name, shape)
+            print("variable: {} \t shape: {}".format(name, shape))
 
-        print "*" * 70
+        print("*" * 70) # 这里改为 python3 版本
 
 
     def build(self):
@@ -61,3 +61,4 @@ class Model(object):
         self.loss = self.add_loss_op(self.pred)
         self.accuracy = self.add_accuracy_op(self.pred)
         self.train_op = self.add_training_op(self.loss)
+        # 这个写法似乎更加优美， 但是其实也差不多， 反正还是过程性的代码就对了，强行面向对象伪装起来也不过如此。 add_开头的函数都是构建图的函数， 而没有这个前缀的都是运行时的函数。
