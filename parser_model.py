@@ -189,14 +189,19 @@ class ParserModel(Model):
 
         return predictions
 
+    def l2_loss_sum(self, tvars):
+        return tf.add_n([tf.nn.l2_loss(t) for t in tvars], "l2_norms_sum")
+
 
     def add_loss_op(self, pred):
         tvars = tf.trainable_variables()
+        without_bias_tvars = [tvar for tvar in tvars if 'bias' not in tvar.name]
+
         with tf.variable_scope("loss"):
             cross_entropy_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
                 labels=self.labels_placeholder, logits=pred), name="batch_xentropy_loss")
-            l2_loss = tf.scalar_mul(self.config.reg_val, tf.add_n([tf.nn.l2_loss(v) for v in tvars if 'bias' not in
-                                                                   v.name]))
+
+            l2_loss = tf.multiply(self.config.reg_val, self.l2_loss_sum(without_bias_tvars), name="l2_loss")
             loss = tf.add(cross_entropy_loss, l2_loss, name="total_batch_loss")
 
         tf.summary.scalar("batch_loss", loss)
@@ -214,11 +219,10 @@ class ParserModel(Model):
 
     def add_training_op(self, loss):
         with tf.variable_scope("optimizer"):
-            tvars = tf.trainable_variables()
-            grads = tf.gradients(loss, tvars)
-            grad_tvars = zip(grads, tvars)
-            self.write_gradient_summaries(grad_tvars)
             optimizer = tf.train.AdamOptimizer(learning_rate=self.config.lr, name="adam_optimizer")
+            tvars = tf.trainable_variables()
+            grad_tvars = optimizer.compute_gradients(loss, tvars)
+            self.write_gradient_summaries(grad_tvars)
             train_op = optimizer.apply_gradients(grad_tvars)
 
         return train_op
